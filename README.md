@@ -1,47 +1,100 @@
 # Interview Helper
 
-基于 Pi SDK 和 LLM Wiki 的本地面试学习 Agent。
+基于 Pi SDK 的本地面试学习 Agent。本分支交付 Issue #2：独立终端工作台、固定官方模型接入、资源隔离和 SQLite 写入保护。
 
-Interview Helper 计划把资料整理、知识讲解、文字练习和面试复盘连在一起：上传文章后建立知识关联，根据回答发现理解缺口，再用后续练习检查是否掌握。
+资料导入、知识整理和三题训练由后续 Issue 接入，当前界面会明确显示这些能力尚未实现。
 
-> 项目处于设计与开发准备阶段，尚无可运行版本。首个切片的范围、接口和验收方式见 [Issue #1](https://github.com/awu123-create/interview-helper/issues/1)。
+## 环境与安装
 
-## 计划提供的能力
+需要 Node.js 22.23.4 和 npm。
 
-- **围绕资料学习**：导入文章或文件，整理成带出处的知识页面，关联不同资料中的概念，支持逐段讲解和追问。
-- **成体系地练习**：围绕同一个主题组织问题链，根据薄弱点追问，区分独立回答和获得提示后的表现。
-- **保留学习证据**：记录原回答、评价依据和进度，支持中断恢复、复测与报告回看。
-- **连接真实面试**：分析简历中的表述与证据，结合面经准备追问，再根据面试记录调整学习重点。
-
-产品不限定岗位、技术栈或经验年限。首个切片先提供终端文字问答，后续补充本地知识图页面和报告。
-
-## 设计思路
-
-```text
-原始资料 → LLM Wiki → 知识关系与问题链
-                              ↓
-                          用户文字回答
-                              ↓
-                      评价依据与学习记录
-                              ↓
-                         后续讲解和练习
+```sh
+npm ci
+npm run build
+npm link
 ```
 
-- [Pi SDK](https://github.com/earendil-works/pi) 负责模型接入、工具调用和会话管理，首批通过 Pi 连接官方模型 API。
-- [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) 负责持续整理知识。Markdown/YAML 页面保存正文、来源和关系，`graph.json` 保存可重建的图索引。
-- SQLite 保存回答、评价、任务、进度和版本关联。个人掌握情况与知识内容分开，错误回答不会直接成为知识事实。
-- TypeScript 和 Node.js 承载本地程序，复用现成的文本与网页解析库。
+之后可以从任意工作目录启动：
 
-资料和学习记录保存在用户自己的数据目录。调用远程模型时，本轮需要的内容仍会发送给所选模型服务。
+```sh
+interview-helper
+interview-helper --data-dir .artifacts/my-workspace
+```
 
-## 开发路线
+默认数据目录是 `~/.interview-helper`。启动目录不会改变数据归属，也不会向 Pi 加载该目录的规则、技能、设置或工具。
 
-- [ ] **文字学习与恢复**：Markdown、TXT、普通网页导入，Wiki 与图索引，文字训练，SQLite 学习记录及中断恢复。
-- [ ] **更多资料与回看方式**：PDF、Word、OCR、Magpie 接入、本地知识图、复测和报告。
-- [ ] **简历与面试复盘**：简历分析、面经检索、追问准备和真实面试记录分析。
+## 配置官方模型
 
-实施细节和验收进度以 [Issues](https://github.com/awu123-create/interview-helper/issues) 为准。
+在数据目录写入 `runtime/config.json`：
 
-## 参与开发
+```json
+{
+  "provider": "openai",
+  "modelId": "gpt-4o-mini"
+}
+```
 
-`main` 保存已合并的文档与实现，`dev` 用于日常开发。当前可以从 [首个切片计划](https://github.com/awu123-create/interview-helper/issues/1) 了解任务，或在 Issues 中讨论学习场景与设计问题。
+也可以在启动时覆盖：
+
+```sh
+interview-helper --provider openai --model gpt-4o-mini
+```
+
+API key 只读取所选提供方对应的环境变量，例如：
+
+```sh
+export OPENAI_API_KEY=...
+```
+
+应用不读取其他工具的凭据，不保存 API key，也不会在失败时自动切换提供方或模型。未配置模型或凭据时仍可打开工作区，提交模型请求时会显示稳定错误码和任务 ID。
+
+## 查看状态
+
+```sh
+interview-helper --status
+interview-helper --status --data-dir .artifacts/my-workspace
+```
+
+打开工作区和查看状态不会发起模型生成请求。TUI 中输入 `/status` 也只读取本地状态。
+
+## 终端操作
+
+| 按键 | 行为 |
+| --- | --- |
+| `Tab` / `Shift+Tab` | 在资料、对话、状态和输入区间切换焦点 |
+| `Enter` | 提交输入区的完整内容 |
+| `Shift+Enter` | 换行，终端不支持时可用 `Alt+Enter` |
+| 方向键 / `PageUp` / `PageDown` | 对话区域聚焦时滚动历史 |
+| `Ctrl+C` | 恢复终端并退出 |
+
+输入区使用 Pi `Editor`，支持中文输入法、多行文本和括号粘贴。流式输出不会锁定编辑，也不会把正在回看的历史滚动到底部。调整窗口后保留草稿和焦点。
+
+## 工具与数据边界
+
+模型只能调用 `workspace_status`。Bash、PowerShell、任意文件读写、SQL、全局技能和项目规则均未加载。
+
+`state.sqlite` 保存 schema 版本、写入代次和模型任务。每个写入短事务都会核对写入者与代次。第二个写入进程会被锁拒绝；失效锁被接管后，旧写入者无法继续提交。
+
+Pi 会话保存在 `DATA_DIR/runtime/sessions`。配置位于 `DATA_DIR/runtime/config.json`，认证文件不会由本应用写入。
+
+## 验证
+
+```sh
+npm run verify:offline
+```
+
+该入口依次执行类型检查、构建、Node.js 单元/集成测试和 `git diff --check`，不调用真实模型。结果写入 `.artifacts/offline-results.json`。
+
+真实 API 验证需要操作者明确确认提供方、模型和调用费用：
+
+```sh
+npm run verify:live -- \
+  --data-dir .artifacts/slice-1-live \
+  --provider openai \
+  --model gpt-4o-mini \
+  --yes
+```
+
+该命令要求一次真实流式回答和 `workspace_status` 调用，结果写入 `.artifacts/live-results.json`。未完成真实调用前，不得把它记录为通过。
+
+真实终端中的中文输入法、多行粘贴、滚动、窗口调整和退出恢复仍需人工核对，模拟渲染测试不替代这项验收。
