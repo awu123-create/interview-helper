@@ -8,9 +8,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
 import { AppError, asAppError } from "../errors.js";
-import { parsePrompt, type ProductConfig } from "../schemas.js";
-import type { WorkspaceStore } from "../store/workspace-store.js";
-import { hasCredentials, resolveCredentials } from "./credentials.js";
+import { parsePrompt, type ModelConfig, type WorkspaceStatus } from "../schemas.js";
+import { resolveCredentials } from "./credentials.js";
 import { createProductResourceLoader } from "./resources.js";
 import { createWorkspaceStatusTool } from "./tools.js";
 
@@ -25,6 +24,14 @@ export interface ModelRunner {
   dispose(): Promise<void>;
 }
 
+export interface ModelRunnerDependencies {
+  dataDir: string;
+  config: ModelConfig | undefined;
+  env: NodeJS.ProcessEnv;
+  readStatus: () => WorkspaceStatus;
+  sessionFactory?: () => Promise<AgentSession>;
+}
+
 export function createModelSettings(provider: string, modelId: string): SettingsManager {
   return SettingsManager.inMemory({
     defaultProvider: provider,
@@ -37,19 +44,22 @@ export function createModelSettings(provider: string, modelId: string): Settings
 }
 
 export class PiModelRunner implements ModelRunner {
+  private readonly dataDir: string;
+  private readonly config: ModelConfig | undefined;
+  private readonly env: NodeJS.ProcessEnv;
+  private readonly readStatus: () => WorkspaceStatus;
+  private readonly sessionFactory: () => Promise<AgentSession>;
   private session?: AgentSession;
   private running = false;
   private disposing = false;
   private idlePromise: Promise<void> | undefined;
-  private readonly sessionFactory: () => Promise<AgentSession>;
 
-  constructor(
-    private readonly store: WorkspaceStore,
-    private readonly config: ProductConfig | undefined,
-    private readonly env: NodeJS.ProcessEnv,
-    sessionFactory?: () => Promise<AgentSession>,
-  ) {
-    this.sessionFactory = sessionFactory ?? (() => this.createSession());
+  constructor(dependencies: ModelRunnerDependencies) {
+    this.dataDir = dependencies.dataDir;
+    this.config = dependencies.config;
+    this.env = dependencies.env;
+    this.readStatus = dependencies.readStatus;
+    this.sessionFactory = dependencies.sessionFactory ?? (() => this.createSession());
   }
 
   activeTools(): string[] {
@@ -59,7 +69,6 @@ export class PiModelRunner implements ModelRunner {
   async prompt(text: string, onEvent: (event: ModelEvent) => void): Promise<void> {
     const input = parsePrompt(text);
     if (this.running) throw new AppError("REQUEST_IN_PROGRESS", "上一个模型任务仍在运行");
-    const taskId = this.store.createTask("model_prompt");
     this.running = true;
     let markIdle!: () => void;
     this.idlePromise = new Promise<void>((resolve) => { markIdle = resolve; });
@@ -80,11 +89,8 @@ export class PiModelRunner implements ModelRunner {
       }
       const failure = toolFailure ?? modelFailure;
       if (failure) throw failure;
-      this.store.finishTask(taskId);
     } catch (error) {
-      const appError = asAppError(error, taskId);
-      this.store.finishTask(taskId, appError);
-      throw appError;
+      throw asAppError(error);
     } finally {
       this.running = false;
       markIdle();
@@ -104,7 +110,7 @@ export class PiModelRunner implements ModelRunner {
 
   private async createSession(): Promise<AgentSession> {
     const credentials = resolveCredentials(this.config, this.env);
-    const runtimeDir = resolve(this.store.database.dataDir, "runtime");
+    const runtimeDir = resolve(this.dataDir, "runtime");
     const modelRuntime = await ModelRuntime.create({
       authPath: resolve(runtimeDir, "auth.json"),
       modelsPath: null,
@@ -128,12 +134,7 @@ export class PiModelRunner implements ModelRunner {
       settingsManager,
       sessionManager: SessionManager.create(runtimeDir, resolve(runtimeDir, "sessions")),
       tools: ["workspace_status"],
-      customTools: [createWorkspaceStatusTool(
-        this.store,
-        credentials.provider,
-        credentials.modelId,
-        hasCredentials(this.config, this.env),
-      )],
+      customTools: [createWorkspaceStatusTool(this.readStatus)],
     });
     return result.session;
   }

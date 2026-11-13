@@ -12,8 +12,7 @@ import {
   type ViewportTUI,
 } from "@earendil-works/pi-tui";
 import type { AppError } from "../errors.js";
-import type { ModelRunner } from "../runtime/pi.js";
-import type { Workspace } from "../workspace.js";
+import type { Workbench } from "../app/workspace.js";
 import { ConversationLog } from "./conversation.js";
 import { createColumns, createPanel, setPanelFocus, type Panel } from "./layout.js";
 import { colors, editorTheme } from "./theme.js";
@@ -36,8 +35,7 @@ export class InterviewTui {
 
   constructor(
     readonly tui: ViewportTUI,
-    private readonly workspace: Workspace,
-    private readonly runner: ModelRunner,
+    private readonly workspace: Workbench,
   ) {
     this.conversation = new ConversationLog();
     this.navigationPanel = createPanel("资料 / 知识", new Text("尚未导入资料\n知识导航将在后续版本接入", 1, 1, colors.muted));
@@ -103,12 +101,7 @@ export class InterviewTui {
   private async submit(text: string) {
     if (text.trim() === "/status") {
       this.refreshStatus();
-      this.conversation.add("system", JSON.stringify(this.workspace.store.getStatus(
-        this.workspace.store.database.dataDir,
-        this.workspace.config?.provider,
-        this.workspace.config?.modelId,
-        this.workspace.status.credentialConfigured,
-      )));
+      this.conversation.add("system", JSON.stringify(this.workspace.getSnapshot().status));
       this.tui.requestRender();
       return;
     }
@@ -120,7 +113,7 @@ export class InterviewTui {
     this.updateFooter();
     this.tui.requestRender();
     try {
-      const request = this.runner.prompt(text, (event) => {
+      const request = this.workspace.prompt(text, (event) => {
         if (event.type === "text_delta") this.conversation.append(event.delta);
         if (event.type === "retry") this.conversation.replaceLast("");
         if (event.type === "tool") {
@@ -145,12 +138,8 @@ export class InterviewTui {
   }
 
   private refreshStatus() {
-    const status = this.workspace.store.getStatus(
-      this.workspace.store.database.dataDir,
-      this.workspace.config?.provider,
-      this.workspace.config?.modelId,
-      this.workspace.status.credentialConfigured,
-    );
+    const snapshot = this.workspace.getSnapshot();
+    const status = snapshot.status;
     this.statusText.setText([
       "训练尚未开始",
       "",
@@ -158,7 +147,7 @@ export class InterviewTui {
       `凭据: ${status.credentialConfigured ? "已配置" : "未配置"}`,
       `活动任务: ${status.activeTasks}`,
       `写入代次: ${status.writerGeneration}`,
-      `工具: ${this.runner.activeTools().join(", ")}`,
+      `工具: ${snapshot.activeTools.join(", ")}`,
     ].join("\n"));
   }
 
@@ -176,13 +165,13 @@ export class InterviewTui {
   }
 
   private async shutdown() {
-    await this.runner.dispose();
+    await this.workspace.close();
     this.tui.stop();
     this.onExit?.();
   }
 }
 
-export function createTerminalTui(workspace: Workspace, runner: ModelRunner): InterviewTui {
+export function createTerminalTui(workspace: Workbench): InterviewTui {
   const terminal = new ProcessTerminal();
-  return new InterviewTui(new TuiAltScreen(terminal), workspace, runner);
+  return new InterviewTui(new TuiAltScreen(terminal), workspace);
 }

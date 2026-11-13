@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { WorkspaceDatabase, SCHEMA_VERSION } from "./database.js";
 import { WriterLease } from "./writer.js";
-import type { WorkspaceStatus } from "../schemas.js";
+import { TaskCountsRowSchema, WriterGenerationRowSchema, parseDatabaseRow, type WorkspaceStatus } from "../schemas.js";
 
 export class WorkspaceStore {
   readonly database: WorkspaceDatabase;
@@ -56,8 +56,9 @@ export class WorkspaceStore {
   }
 
   getStatus(dataDir: string, provider = "", modelId = "", credentialConfigured = false): WorkspaceStatus {
-    const writer = this.database.db.prepare("SELECT generation FROM writer_state WHERE singleton = 1").get() as { generation: number } | undefined;
-    const tasks = this.database.db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active FROM tasks").get() as { total: number; active: number | null };
+    const writerRow = this.database.db.prepare("SELECT generation FROM writer_state WHERE singleton = 1").get();
+    const writer = writerRow ? parseDatabaseRow(WriterGenerationRowSchema, writerRow) : undefined;
+    const tasks = parseDatabaseRow(TaskCountsRowSchema, this.database.db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active FROM tasks").get());
     return {
       dataDir,
       schemaVersion: SCHEMA_VERSION,

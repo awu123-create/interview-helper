@@ -69,6 +69,14 @@ interview-helper --status --data-dir .artifacts/my-workspace
 
 输入区使用 Pi `Editor`，支持中文输入法、多行文本和括号粘贴。流式输出不会锁定编辑，也不会把正在回看的历史滚动到底部。调整窗口后保留草稿和焦点。
 
+## 模块结构
+
+- `src/cli`：Commander 参数解析、应用入口和信号处理。
+- `src/app/workspace.ts`：唯一的 `Workbench` 接口，负责任务编排、状态快照和关闭顺序。
+- `src/runtime`：Pi 会话、模型事件和只读工具回调，不负责任务落库。
+- `src/store`：SQLite 持久化、写入互斥与崩溃恢复。
+- `src/tui`：界面与输入，只调用 `Workbench`，不接触 Store。
+
 ## 工具与数据边界
 
 模型只能调用 `workspace_status`。Bash、PowerShell、任意文件读写、SQL、全局技能和项目规则均未加载。

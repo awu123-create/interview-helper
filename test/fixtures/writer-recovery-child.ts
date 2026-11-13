@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { resolve } from "node:path";
-import { openWorkspace } from "../../src/workspace.js";
+import { WorkspaceStore } from "../../src/store/workspace-store.js";
 
 const [dir, role, control] = process.argv.slice(2) as [string, string, string];
 let takeoverRead = false;
@@ -32,9 +32,9 @@ fs.readFileSync = ((path: fs.PathOrFileDescriptor, options?: any) => {
 syncBuiltinESMExports();
 
 try {
-  const workspace = openWorkspace(dir);
-  workspace.store.createTask("model_prompt");
-  console.log(JSON.stringify({ role, event: "opened", generation: workspace.status.writerGeneration }));
+  const workspace = new WorkspaceStore(dir);
+  workspace.createTask("model_prompt");
+  console.log(JSON.stringify({ role, event: "opened", generation: workspace.getStatus(dir).writerGeneration }));
   process.stdin.on("data", () => {
     workspace.close();
     process.exit(0);

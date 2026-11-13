@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import test from "node:test";
 import { TuiAltScreen, type ProgramStatus, type Terminal } from "@earendil-works/pi-tui";
-import type { ModelEvent, ModelRunner } from "../src/runtime/pi.js";
-import type { WorkspaceStore } from "../src/store/workspace-store.js";
+import type { Workbench, WorkspaceSnapshot } from "../src/app/workspace.js";
+import type { ModelEvent } from "../src/runtime/pi.js";
 import { InterviewTui } from "../src/tui/app.js";
-import { openWorkspace } from "../src/workspace.js";
 
 class TestTerminal implements Terminal {
   columns = 100;
@@ -36,21 +32,38 @@ class TestTerminal implements Terminal {
   setProgramStatus(_status: ProgramStatus) {}
 }
 
-class ControlledRunner implements ModelRunner {
+class ControlledWorkbench implements Workbench {
+  readonly config = undefined;
   calls = 0;
+  activeTasks = 0;
+  totalTasks = 0;
   eventHandler?: (event: ModelEvent) => void;
-  complete?: () => void;
-  activeTools = () => ["workspace_status"];
+  private complete?: () => void;
 
-  constructor(private readonly store: WorkspaceStore) {}
+  getSnapshot(): WorkspaceSnapshot {
+    return {
+      status: {
+        dataDir: "/virtual",
+        schemaVersion: 1,
+        writerGeneration: 1,
+        activeTasks: this.activeTasks,
+        totalTasks: this.totalTasks,
+        provider: "",
+        modelId: "",
+        credentialConfigured: false,
+      },
+      activeTools: ["workspace_status"],
+    };
+  }
 
   prompt(_text: string, onEvent: (event: ModelEvent) => void) {
     this.calls += 1;
+    this.activeTasks += 1;
+    this.totalTasks += 1;
     this.eventHandler = onEvent;
-    const taskId = this.store.createTask("model_prompt");
     return new Promise<void>((resolve) => {
       this.complete = () => {
-        this.store.finishTask(taskId);
+        this.activeTasks -= 1;
         resolve();
       };
     });
@@ -58,22 +71,21 @@ class ControlledRunner implements ModelRunner {
 
   emit(event: ModelEvent) { this.eventHandler?.(event); }
   finish() { this.complete?.(); }
-  async dispose() {
+  async close() {
     this.finish();
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
 function setup() {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-tui-")));
   const terminal = new TestTerminal();
-  const runner = new ControlledRunner(workspace.store);
-  const app = new InterviewTui(new TuiAltScreen(terminal), workspace, runner);
-  return { workspace, terminal, runner, app };
+  const runner = new ControlledWorkbench();
+  const app = new InterviewTui(new TuiAltScreen(terminal), runner);
+  return { terminal, runner, app };
 }
 
 test("真实多区域组件支持焦点、中文多行粘贴和 resize", async () => {
-  const { workspace, terminal, runner, app } = setup();
+  const { terminal, runner, app } = setup();
   app.start();
   app.tui.renderNow();
   assert.match(terminal.output, /资料 \/ 知识/);
@@ -95,12 +107,11 @@ test("真实多区域组件支持焦点、中文多行粘贴和 resize", async (
   assert.equal(app.focusArea, "status");
   assert.match(terminal.output, /Ctrl\+C 退出/);
   await app.stop();
-  workspace.close();
   assert.equal(terminal.stopped, true);
 });
 
 test("Kitty 松开事件不会重复切焦点或滚动", async () => {
-  const { workspace, terminal, app } = setup();
+  const { terminal, app } = setup();
   app.start();
   terminal.input?.("\x1b[9;1u");
   assert.equal(app.focusArea, "navigation");
@@ -115,11 +126,10 @@ test("Kitty 松开事件不会重复切焦点或滚动", async () => {
   terminal.input?.("\x1b[1;1:3A");
   assert.equal(app.conversationScroll.scrollTop, 19);
   await app.stop();
-  workspace.close();
 });
 
 test("自动重试会清除失败尝试的文本残片", async () => {
-  const { workspace, runner, app } = setup();
+  const { runner, app } = setup();
   app.start();
   app.editor.setText("测试重试");
   app.editor.handleInput("\r");
@@ -131,11 +141,10 @@ test("自动重试会清除失败尝试的文本残片", async () => {
   runner.finish();
   await new Promise((resolve) => setImmediate(resolve));
   await app.stop();
-  workspace.close();
 });
 
 test("模型控制序列不会进入终端输出", async () => {
-  const { workspace, terminal, runner, app } = setup();
+  const { terminal, runner, app } = setup();
   app.start();
   app.editor.setText("测试输出");
   app.editor.handleInput("\r");
@@ -152,11 +161,10 @@ test("模型控制序列不会进入终端输出", async () => {
   runner.finish();
   await new Promise((resolve) => setImmediate(resolve));
   await app.stop();
-  workspace.close();
 });
 
 test("一次多行粘贴只产生一次提交", async () => {
-  const { workspace, runner, app } = setup();
+  const { runner, app } = setup();
   app.start();
   app.editor.handleInput("\x1b[200~中文\n第一行\n第二行\x1b[201~");
   assert.equal(runner.calls, 0);
@@ -165,11 +173,10 @@ test("一次多行粘贴只产生一次提交", async () => {
   runner.finish();
   await new Promise((resolve) => setImmediate(resolve));
   await app.stop();
-  workspace.close();
 });
 
 test("流式期间可继续编辑，活动状态刷新且历史位置不变", async () => {
-  const { workspace, terminal, runner, app } = setup();
+  const { terminal, runner, app } = setup();
   app.start();
   app.editor.setText("请解释事务");
   app.editor.handleInput("\r");
@@ -195,28 +202,25 @@ test("流式期间可继续编辑，活动状态刷新且历史位置不变", as
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(app.streaming, false);
   await app.stop();
-  workspace.close();
 });
 
 test("退出等待在途模型任务收尾后再恢复终端", async () => {
-  const { workspace, terminal, runner, app } = setup();
+  const { terminal, runner, app } = setup();
   app.start();
   app.editor.setText("进行中的请求");
   app.editor.handleInput("\r");
   assert.equal(runner.calls, 1);
   await app.stop();
   assert.equal(terminal.stopped, true);
-  assert.equal(workspace.store.getStatus(workspace.store.database.dataDir).activeTasks, 0);
-  workspace.close();
+  assert.equal(runner.getSnapshot().status.activeTasks, 0);
 });
 
 test("非输入焦点不会把文字当成提交", async () => {
-  const { workspace, terminal, runner, app } = setup();
+  const { terminal, runner, app } = setup();
   app.start();
   app.setFocus("navigation");
   terminal.input?.("不是答案");
   assert.equal(runner.calls, 0);
   assert.equal(app.conversation.getEntries().filter((entry) => entry.role === "user").length, 0);
   await app.stop();
-  workspace.close();
 });

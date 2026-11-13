@@ -3,12 +3,7 @@ import { linkSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { AppError } from "../errors.js";
-
-interface LockRecord {
-  writerId: string;
-  generation: number;
-  pid: number;
-}
+import { WriterGenerationRowSchema, WriterOwnerRowSchema, parseDatabaseRow, parseLockRecord, type LockRecord } from "../schemas.js";
 
 export class WriterLease {
   private constructor(
@@ -59,7 +54,7 @@ export class WriterLease {
     try {
       const text = readFileSync(path, "utf8");
       if (!text) return undefined;
-      return JSON.parse(text) as LockRecord;
+      return parseLockRecord(JSON.parse(text));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return undefined;
       throw error;
@@ -72,8 +67,8 @@ export class WriterLease {
   }
 
   private static nextGeneration(db: Database.Database): number {
-    const row = db.prepare("SELECT generation FROM writer_state WHERE singleton = 1").get() as { generation: number } | undefined;
-    return (row?.generation ?? 0) + 1;
+    const row = db.prepare("SELECT generation FROM writer_state WHERE singleton = 1").get();
+    return (row ? parseDatabaseRow(WriterGenerationRowSchema, row).generation : 0) + 1;
   }
 
   private static writeOwner(db: Database.Database, writerId: string, generation: number) {
@@ -95,7 +90,7 @@ export class WriterLease {
   }
 
   assertCurrent(db: Database.Database) {
-    const row = db.prepare("SELECT owner_id, generation FROM writer_state WHERE singleton = 1").get() as { owner_id: string; generation: number };
+    const row = parseDatabaseRow(WriterOwnerRowSchema, db.prepare("SELECT owner_id, generation FROM writer_state WHERE singleton = 1").get());
     if (row.owner_id !== this.writerId || row.generation !== this.generation) {
       throw new AppError("STALE_WRITER", "写入代次已变化，拒绝旧进程提交");
     }

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const steps = [
+  ["layer-boundaries", "node", ["scripts/verify-layers.mjs"]],
   ["typecheck", "npm", ["run", "typecheck"]],
   ["build", "npm", ["run", "build"]],
   ["test", "npm", ["test"]],

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { loadProductConfig, parseCliArguments } from "../src/config.js";
+import { parseCliArguments } from "../src/cli/options.js";
+import { loadModelConfig } from "../src/config/load-model-config.js";
 import { AppError, asCliError } from "../src/errors.js";
 import { PROVIDER_ENVIRONMENT, resolveCredentials } from "../src/runtime/credentials.js";
 import { createProductResourceLoader } from "../src/runtime/resources.js";
@@ -56,19 +57,19 @@ test("入口保留已有错误并只把未知异常归为 INTERNAL_ERROR", () =>
 test("通过符号链接执行 CLI 仍进入 main", () => {
   const dir = mkdtempSync(resolve(tmpdir(), "interview-cli-link-"));
   const link = resolve(dir, "interview-helper.ts");
-  symlinkSync(resolve("src/cli.ts"), link);
+  symlinkSync(resolve("src/cli/main.ts"), link);
   const result = spawnSync(process.execPath, ["--import", "tsx", link, "--help"], { cwd: process.cwd(), encoding: "utf8" });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Interview Helper/);
 });
 
-test("产品配置经过 schema 校验", () => {
+test("模型配置经过 schema 校验", () => {
   const dir = mkdtempSync(resolve(tmpdir(), "interview-config-"));
   mkdirSync(resolve(dir, "runtime"));
   writeFileSync(resolve(dir, "runtime", "config.json"), JSON.stringify({ provider: "openai", modelId: "gpt-5.2" }));
-  assert.deepEqual(loadProductConfig(dir), { provider: "openai", modelId: "gpt-5.2" });
+  assert.deepEqual(loadModelConfig(dir), { provider: "openai", modelId: "gpt-5.2" });
   writeFileSync(resolve(dir, "runtime", "config.json"), JSON.stringify({ provider: "openai", modelId: "gpt-5.2", key: "secret" }));
-  assert.throws(() => loadProductConfig(dir), (error: unknown) => error instanceof AppError && error.code === "INVALID_CONFIG");
+  assert.throws(() => loadModelConfig(dir), (error: unknown) => error instanceof AppError && error.code === "INVALID_CONFIG");
 });
 
 test("只读取所选 provider 的环境变量", () => {

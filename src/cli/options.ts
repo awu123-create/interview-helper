@@ -1,17 +1,8 @@
 import { Command, CommanderError } from "commander";
-import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { AppError } from "./errors.js";
-import { parseProductConfig, type ProductConfig } from "./schemas.js";
-
-export interface CliOptions {
-  dataDir: string;
-  provider?: string;
-  modelId?: string;
-  status: boolean;
-  help: boolean;
-}
+import { AppError } from "../errors.js";
+import { parseCliOptions, type CliOptions } from "../schemas.js";
 
 interface ParsedCliOptions {
   dataDir?: string;
@@ -32,7 +23,7 @@ export function parseCliArguments(args: string[], cwd: string, home = homedir())
     .exitOverride()
     .configureOutput({ writeOut: () => {}, writeErr: () => {} });
 
-  const defaults = (help: boolean): CliOptions => ({
+  const defaults = (help: boolean): CliOptions => parseCliOptions({
     dataDir: resolve(home, ".interview-helper"),
     status: false,
     help,
@@ -48,28 +39,13 @@ export function parseCliArguments(args: string[], cwd: string, home = homedir())
     throw new AppError("INVALID_ARGUMENT", error.message, undefined, { cause: error });
   }
 
-  return {
+  return parseCliOptions({
     dataDir: resolve(cwd, options.dataDir ?? resolve(home, ".interview-helper")),
     ...(options.provider ? { provider: options.provider } : {}),
     ...(options.model ? { modelId: options.model } : {}),
     status: options.status ?? false,
     help: false,
-  };
+  });
 }
 
-export function loadProductConfig(dataDir: string, overrides: Pick<CliOptions, "provider" | "modelId"> = {}): ProductConfig | undefined {
-  const path = resolve(dataDir, "runtime", "config.json");
-  let stored: ProductConfig | undefined;
-  if (existsSync(path)) {
-    try {
-      stored = parseProductConfig(JSON.parse(readFileSync(path, "utf8")));
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("INVALID_CONFIG", "runtime/config.json 不是有效 JSON", undefined, { cause: error });
-    }
-  }
-  const provider = overrides.provider ?? stored?.provider;
-  const modelId = overrides.modelId ?? stored?.modelId;
-  if (!provider && !modelId) return undefined;
-  return parseProductConfig({ provider, modelId });
-}
+export type { CliOptions } from "../schemas.js";

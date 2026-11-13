@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parseCliArguments } from "./config.js";
-import { asCliError } from "./errors.js";
-import { PiModelRunner } from "./runtime/pi.js";
-import { createTerminalTui } from "./tui/app.js";
-import { openWorkspace } from "./workspace.js";
+import { parseCliArguments } from "./options.js";
+import { asCliError } from "../errors.js";
+import { createTerminalTui } from "../tui/app.js";
+import { openWorkspace } from "../app/workspace.js";
 
 const help = `Interview Helper
 
@@ -31,12 +30,11 @@ export async function main(args = process.argv.slice(2)) {
   }
   const workspace = openWorkspace(options.dataDir, options);
   if (options.status) {
-    process.stdout.write(`${JSON.stringify(workspace.status, null, 2)}\n`);
-    workspace.close();
+    process.stdout.write(`${JSON.stringify(workspace.getSnapshot().status, null, 2)}\n`);
+    await workspace.close();
     return;
   }
-  const runner = new PiModelRunner(workspace.store, workspace.config, process.env);
-  const app = createTerminalTui(workspace, runner);
+  const app = createTerminalTui(workspace);
   const stop = () => app.stop();
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
@@ -44,7 +42,6 @@ export async function main(args = process.argv.slice(2)) {
     app.onExit = () => {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
-      workspace.close();
       resolve();
     };
     app.start();

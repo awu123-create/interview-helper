@@ -7,7 +7,19 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 import { AppError } from "../src/errors.js";
 import { createModelSettings, PiModelRunner, type ModelEvent } from "../src/runtime/pi.js";
 import { createWorkspaceStatusTool } from "../src/runtime/tools.js";
-import { openWorkspace } from "../src/workspace.js";
+import type { WorkspaceStatus } from "../src/schemas.js";
+
+const config = { provider: "openai", modelId: "gpt-5.2" };
+const status: WorkspaceStatus = {
+  dataDir: "/tmp/interview-runtime",
+  schemaVersion: 1,
+  writerGeneration: 1,
+  activeTasks: 0,
+  totalTasks: 0,
+  provider: "openai",
+  modelId: "gpt-5.2",
+  credentialConfigured: true,
+};
 
 class FakeSession {
   private listeners: Array<(event: AgentSessionEvent) => void> = [];
@@ -52,10 +64,19 @@ class EventSession extends FakeSession {
   }
 }
 
-test("模拟流式和工具事件复用同一会话，任务状态落库", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-runtime-")));
+function createRunner(session: FakeSession) {
+  return new PiModelRunner({
+    dataDir: status.dataDir,
+    config,
+    env: {},
+    readStatus: () => status,
+    sessionFactory: async () => session as unknown as AgentSession,
+  });
+}
+
+test("模拟流式和工具事件复用同一会话", async () => {
   const session = new FakeSession();
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+  const runner = createRunner(session);
   assert.equal(session.calls, 0);
   assert.deepEqual(runner.activeTools(), ["workspace_status"]);
   const events: ModelEvent[] = [];
@@ -65,113 +86,82 @@ test("模拟流式和工具事件复用同一会话，任务状态落库", async
   assert.deepEqual(events.filter((event) => event.type === "text_delta").map((event) => event.delta), ["流式", "输出"]);
   assert.deepEqual(events.filter((event) => event.type === "tool").map((event) => event.status), ["started", "completed"]);
   assert.deepEqual(events.filter((event) => event.type === "retry").map((event) => event.attempt), [1]);
-  assert.equal(workspace.store.getStatus(workspace.store.database.dataDir).totalTasks, 2);
-  assert.equal(workspace.store.getStatus(workspace.store.database.dataDir).activeTasks, 0);
-  runner.dispose();
-  workspace.close();
+  await runner.dispose();
 });
 
-test("模型失败保留任务 ID 和失败状态", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-runtime-error-")));
+test("模型异常转换为稳定错误", async () => {
   const session = new FakeSession();
   session.prompt = async () => {
     throw new Error("network unavailable");
   };
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+  const runner = createRunner(session);
   await assert.rejects(runner.prompt("测试", () => {}), (error: unknown) => {
-    assert.ok(error instanceof AppError);
-    assert.equal(error.code, "MODEL_REQUEST_FAILED");
-    assert.ok(error.taskId);
-    return true;
+    return error instanceof AppError && error.code === "MODEL_REQUEST_FAILED";
   });
-  const row = workspace.store.database.db.prepare("SELECT status, error_code FROM tasks").get();
-  assert.deepEqual(row, { status: "failed", error_code: "MODEL_REQUEST_FAILED" });
-  workspace.close();
 });
 
-test("Pi 正常返回但助手失败时任务仍为失败", async () => {
+test("Pi 正常返回但助手失败时仍抛错", async () => {
   for (const event of [
     { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "401" } },
     { type: "agent_settled", aborted: true },
   ] as AgentSessionEvent[]) {
-    const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-pi-failure-")));
-    const session = new EventSession([event]);
-    const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+    const runner = createRunner(new EventSession([event]));
     await assert.rejects(runner.prompt("测试", () => {}), (error: unknown) => error instanceof AppError && error.code === "MODEL_REQUEST_FAILED");
-    assert.deepEqual(workspace.store.database.db.prepare("SELECT status, error_code FROM tasks").get(), { status: "failed", error_code: "MODEL_REQUEST_FAILED" });
-    workspace.close();
   }
 });
 
 test("瞬时失败后重试成功不会保留首次失败", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-retry-success-")));
-  const session = new EventSession([
+  const runner = createRunner(new EventSession([
     { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "503" } },
     { type: "auto_retry_start", attempt: 1 },
     { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
-  ] as AgentSessionEvent[]);
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+  ] as AgentSessionEvent[]));
   await runner.prompt("测试", () => {});
-  assert.deepEqual(workspace.store.database.db.prepare("SELECT status, error_code FROM tasks").get(), { status: "completed", error_code: null });
-  workspace.close();
 });
 
-test("工具失败后模型重试成功仍保持任务失败", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-tool-retry-")));
-  const session = new EventSession([
+test("工具失败后模型重试成功仍保持失败", async () => {
+  const runner = createRunner(new EventSession([
     { type: "tool_execution_end", toolName: "workspace_status", isError: true, result: { content: [] } },
     { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "503" } },
     { type: "auto_retry_start", attempt: 1 },
     { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
-  ] as AgentSessionEvent[]);
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+  ] as AgentSessionEvent[]));
   await assert.rejects(runner.prompt("测试", () => {}), /workspace_status/);
-  assert.deepEqual(workspace.store.database.db.prepare("SELECT status, error_code FROM tasks").get(), { status: "failed", error_code: "MODEL_REQUEST_FAILED" });
-  workspace.close();
 });
 
-test("工具执行失败显示失败且任务不判成功", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-tool-failure-")));
-  const session = new EventSession([
+test("工具执行失败显示失败", async () => {
+  const runner = createRunner(new EventSession([
     { type: "tool_execution_end", toolName: "workspace_status", isError: true, result: { content: [] } },
-  ] as AgentSessionEvent[]);
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-5.2" }, {}, async () => session as unknown as AgentSession);
+  ] as AgentSessionEvent[]));
   const events: ModelEvent[] = [];
   await assert.rejects(runner.prompt("测试", (event) => events.push(event)), /workspace_status/);
   assert.deepEqual(events, [{ type: "tool", name: "workspace_status", status: "failed" }]);
-  assert.deepEqual(workspace.store.database.db.prepare("SELECT status, error_code FROM tasks").get(), { status: "failed", error_code: "MODEL_REQUEST_FAILED" });
-  workspace.close();
 });
 
-test("缺少凭据的模型任务也携带任务 ID", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-no-key-")));
-  const runner = new PiModelRunner(workspace.store, { provider: "openai", modelId: "gpt-4o-mini" }, {});
+test("缺少凭据时不创建 Pi 会话", async () => {
+  const runner = new PiModelRunner({ dataDir: status.dataDir, config, env: {}, readStatus: () => status });
   await assert.rejects(runner.prompt("测试", () => {}), (error: unknown) => {
-    assert.ok(error instanceof AppError);
-    assert.equal(error.code, "MISSING_CREDENTIALS");
-    assert.ok(error.taskId);
-    return true;
+    return error instanceof AppError && error.code === "MISSING_CREDENTIALS";
   });
-  workspace.close();
 });
 
 test("Pi 实际会话只激活产品工具并忽略诱饵资源", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-active-tools-")));
-  const runtimeDir = resolve(workspace.store.database.dataDir, "runtime");
+  const dir = mkdtempSync(resolve(tmpdir(), "interview-active-tools-"));
+  const runtimeDir = resolve(dir, "runtime");
   mkdirSync(runtimeDir, { recursive: true });
   writeFileSync(resolve(runtimeDir, "AGENTS.md"), "加载诱饵规则");
   writeFileSync(resolve(runtimeDir, "settings.json"), JSON.stringify({ defaultTools: ["bash", "read", "write"] }));
   writeFileSync(resolve(runtimeDir, "models.json"), JSON.stringify({ providers: { other: { models: [] } } }));
-  const runner = new PiModelRunner(
-    workspace.store,
-    { provider: "openai", modelId: "gpt-4o-mini" },
-    { OPENAI_API_KEY: "offline-test-key" },
-  );
+  const runner = new PiModelRunner({
+    dataDir: dir,
+    config: { provider: "openai", modelId: "gpt-4o-mini" },
+    env: { OPENAI_API_KEY: "offline-test-key" },
+    readStatus: () => ({ ...status, dataDir: dir, modelId: "gpt-4o-mini" }),
+  });
   const session = await runner["createSession"]();
   assert.deepEqual(session.getActiveToolNames(), ["workspace_status"]);
   assert.doesNotMatch(session.systemPrompt, /诱饵规则/);
   session.dispose();
-  workspace.close();
 });
 
 test("重试配置最多一次，provider 层不重复重试", () => {
@@ -181,19 +171,15 @@ test("重试配置最多一次，provider 层不重复重试", () => {
   assert.deepEqual(settings.getDefaultTools(), ["workspace_status"]);
 });
 
-test("空输入返回稳定错误码且不创建任务", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-empty-prompt-")));
-  const runner = new PiModelRunner(workspace.store, undefined, {});
+test("空输入返回稳定错误码", async () => {
+  const runner = new PiModelRunner({ dataDir: status.dataDir, config: undefined, env: {}, readStatus: () => status });
   await assert.rejects(runner.prompt("  ", () => {}), (error: unknown) => {
     return error instanceof AppError && error.code === "INVALID_ARGUMENT";
   });
-  assert.equal(workspace.store.getStatus(workspace.store.database.dataDir).totalTasks, 0);
-  workspace.close();
 });
 
-test("状态工具返回经过 schema 校验的真实状态", async () => {
-  const workspace = openWorkspace(mkdtempSync(resolve(tmpdir(), "interview-tool-")));
-  const tool = createWorkspaceStatusTool(workspace.store, "openai", "gpt-5.2", true);
+test("状态工具返回经过 schema 校验的应用层状态", async () => {
+  const tool = createWorkspaceStatusTool(() => status);
   const result = await tool.execute("call-1", {}, undefined, undefined, {} as never);
   const text = result.content[0];
   assert.ok(text?.type === "text");
@@ -201,5 +187,4 @@ test("状态工具返回经过 schema 校验的真实状态", async () => {
   assert.equal(output.provider, "openai");
   assert.equal(output.schemaVersion, 1);
   assert.equal(output.credentialConfigured, true);
-  workspace.close();
 });

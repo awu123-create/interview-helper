@@ -1,9 +1,8 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
-import { WorkspaceStatusSchema, WorkspaceToolInputSchema } from "../schemas.js";
-import type { WorkspaceStore } from "../store/workspace-store.js";
+import { WorkspaceStatusSchema, WorkspaceToolInputSchema, type WorkspaceStatus } from "../schemas.js";
 
-export function createWorkspaceStatusTool(store: WorkspaceStore, provider: string, modelId: string, credentialConfigured: boolean): ToolDefinition {
+export function createWorkspaceStatusTool(readStatus: () => WorkspaceStatus): ToolDefinition {
   return {
     name: "workspace_status",
     label: "工作区状态",
@@ -12,7 +11,7 @@ export function createWorkspaceStatusTool(store: WorkspaceStore, provider: strin
     parameters: WorkspaceToolInputSchema,
     outputSchema: WorkspaceStatusSchema,
     execute: async () => {
-      const status = Value.Parse(WorkspaceStatusSchema, store.getStatus(store.database.dataDir, provider, modelId, credentialConfigured));
+      const status = Value.Parse(WorkspaceStatusSchema, readStatus());
       return {
         content: [{ type: "text", text: JSON.stringify(status) }],
         structuredContent: status,

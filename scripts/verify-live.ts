@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseCliArguments } from "../src/config.js";
+import { parseCliArguments } from "../src/cli/options.js";
 import { sanitizeTerminalText } from "../src/terminal-output.js";
-import { PiModelRunner, type ModelEvent } from "../src/runtime/pi.js";
-import { openWorkspace } from "../src/workspace.js";
+import type { ModelEvent } from "../src/runtime/pi.js";
+import { openWorkspace } from "../src/app/workspace.js";
 
 const args = process.argv.slice(2);
 const confirmed = args.includes("--yes");
@@ -12,11 +12,10 @@ if (!confirmed) {
   throw new Error("真实模型会产生 API 调用。确认提供方、模型与费用授权后追加 --yes");
 }
 const workspace = openWorkspace(options.dataDir, options);
-const runner = new PiModelRunner(workspace.store, workspace.config, process.env);
 const events: ModelEvent[] = [];
 let output = "";
 try {
-  await runner.prompt("请先调用 workspace_status 查询当前工作区，然后用一句中文说明查询结果。", (event) => {
+  await workspace.prompt("请先调用 workspace_status 查询当前工作区，然后用一句中文说明查询结果。", (event) => {
     events.push(event);
     if (event.type === "text_delta") {
       output += event.delta;
@@ -29,7 +28,7 @@ try {
     modelId: workspace.config?.modelId,
     streamed,
     toolCalled,
-    activeTools: runner.activeTools(),
+    activeTools: workspace.getSnapshot().activeTools,
     output,
   };
   mkdirSync(".artifacts", { recursive: true });
@@ -38,6 +37,5 @@ try {
   process.stdout.write(`\n${JSON.stringify({ streamed, toolCalled, activeTools: result.activeTools })}\n`);
   if (!streamed || !toolCalled) process.exitCode = 1;
 } finally {
-  await runner.dispose();
-  workspace.close();
+  await workspace.close();
 }

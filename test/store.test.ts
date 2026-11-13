@@ -6,7 +6,12 @@ import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { AppError } from "../src/errors.js";
-import { openWorkspace } from "../src/workspace.js";
+import { WorkspaceStore } from "../src/store/workspace-store.js";
+
+function openWorkspace(dataDir: string, _overrides = {}, options: { readOnly?: boolean } = {}) {
+  const store = new WorkspaceStore(dataDir, options.readOnly ?? false);
+  return { store, status: store.getStatus(dataDir), close: () => store.close() };
+}
 
 function tempDir() {
   return mkdtempSync(resolve(tmpdir(), "interview-store-"));
@@ -37,7 +42,7 @@ test("第二个写入进程被拒绝", () => {
 test("真实第二进程竞争同一工作区时被拒绝", () => {
   const dir = tempDir();
   const first = openWorkspace(dir);
-  const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", "--status", "--data-dir", dir], {
+  const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli/main.ts", "--status", "--data-dir", dir], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -70,7 +75,7 @@ test("主锁创建后进程崩溃仍可重开", () => {
   const script = `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
     const open = fs.openSync; fs.openSync = (path, ...args) => { const fd = open(path, ...args); if (String(path).endsWith('/writer.lock')) process.kill(process.pid, 'SIGKILL'); return fd; };
     const link = fs.linkSync; fs.linkSync = (oldPath, newPath) => { const result = link(oldPath, newPath); if (String(newPath).endsWith('/writer.lock')) process.kill(process.pid, 'SIGKILL'); return result; };
-    syncBuiltinESMExports(); const { openWorkspace } = await import('./src/workspace.ts'); openWorkspace(process.argv[1]);`;
+    syncBuiltinESMExports(); const { WorkspaceStore } = await import('./src/store/workspace-store.ts'); new WorkspaceStore(process.argv[1]);`;
   const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, dir], { cwd: process.cwd(), encoding: "utf8" });
   assert.equal(result.signal, "SIGKILL");
   const workspace = openWorkspace(dir);
@@ -80,7 +85,7 @@ test("主锁创建后进程崩溃仍可重开", () => {
 test("双进程同时恢复时只有存活写入者可以创建任务", async () => {
   const dir = tempDir();
   const control = tempDir();
-  const initialize = `import { openWorkspace } from './src/workspace.ts'; openWorkspace(process.argv[1]); process.exit(0);`;
+  const initialize = `import { WorkspaceStore } from './src/store/workspace-store.ts'; new WorkspaceStore(process.argv[1]); process.exit(0);`;
   spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", initialize, dir], { cwd: process.cwd() });
   writeFileSync(resolve(dir, "runtime", "writer.lock.takeover"), JSON.stringify({ writerId: "crashed", pid: 999_999_999 }));
 
@@ -138,9 +143,19 @@ test("双进程同时恢复时只有存活写入者可以创建任务", async ()
   }
 });
 
+test("结构无效的锁记录按失效锁恢复", () => {
+  const dir = tempDir();
+  const first = openWorkspace(dir);
+  first.close();
+  writeFileSync(resolve(dir, "runtime", "writer.lock"), JSON.stringify({ writerId: 42, generation: "bad", pid: "unknown" }));
+  const workspace = openWorkspace(dir);
+  assert.equal(workspace.status.writerGeneration, 2);
+  workspace.close();
+});
+
 test("重启将崩溃遗留的运行中任务标为中断", () => {
   const dir = tempDir();
-  const script = `import { openWorkspace } from './src/workspace.ts'; const workspace = openWorkspace(process.argv[1]); console.log(workspace.store.createTask('model_prompt')); process.kill(process.pid, 'SIGKILL');`;
+  const script = `import { WorkspaceStore } from './src/store/workspace-store.ts'; const workspace = new WorkspaceStore(process.argv[1]); console.log(workspace.createTask('model_prompt')); process.kill(process.pid, 'SIGKILL');`;
   const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, dir], { cwd: process.cwd(), encoding: "utf8" });
   assert.equal(result.signal, "SIGKILL");
   const taskId = result.stdout.trim();
@@ -164,8 +179,8 @@ test("全新工作区并发首开只产生写入锁结果", async () => {
       }
       return result;
     };
-    const { openWorkspace } = await import('./src/workspace.ts');
-    try { const workspace = openWorkspace(process.argv[1]); console.log(JSON.stringify({ code: 'OK' })); setTimeout(() => workspace.close(), 150); }
+    const { WorkspaceStore } = await import('./src/store/workspace-store.ts');
+    try { const workspace = new WorkspaceStore(process.argv[1]); console.log(JSON.stringify({ code: 'OK' })); setTimeout(() => workspace.close(), 150); }
     catch (error) { console.log(JSON.stringify({ code: error.code ?? 'INTERNAL_ERROR' })); process.exitCode = 1; }`;
   const launch = () => new Promise<string>((resolve, reject) => {
     const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, dir, barrier], { cwd: process.cwd() });
@@ -182,6 +197,19 @@ test("全新工作区并发首开只产生写入锁结果", async () => {
   });
   const codes = await Promise.all([launch(), launch()]);
   for (const code of codes) assert.ok(code === "OK" || code === "WORKSPACE_LOCKED", `首轮迁移返回了 ${code}`);
+});
+
+test("SQLite 写入代次结构不匹配时明确失败", () => {
+  const dir = tempDir();
+  const first = openWorkspace(dir);
+  first.close();
+  const db = new Database(resolve(dir, "state.sqlite"));
+  db.prepare("UPDATE writer_state SET generation = 'invalid'").run();
+  db.close();
+  assert.throws(
+    () => openWorkspace(dir, {}, { readOnly: true }),
+    (error: unknown) => error instanceof AppError && error.code === "DATA_VERSION_UNSUPPORTED",
+  );
 });
 
 test("不兼容数据版本拒绝写入", () => {
