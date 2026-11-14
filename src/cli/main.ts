@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parseCliArguments } from "./options.js";
+
+import { openWorkspace } from "../app/workspace.js";
 import { asCliError } from "../errors.js";
 import { createTerminalTui } from "../tui/app.js";
-import { openWorkspace } from "../app/workspace.js";
+import { parseCliArguments } from "./options.js";
 
 const help = `Interview Helper
 
@@ -30,7 +31,9 @@ export async function main(args = process.argv.slice(2)) {
   }
   const workspace = openWorkspace(options.dataDir, options);
   if (options.status) {
-    process.stdout.write(`${JSON.stringify(workspace.getSnapshot().status, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify(workspace.getSnapshot().status, null, 2)}\n`,
+    );
     await workspace.close();
     return;
   }
@@ -49,7 +52,10 @@ export async function main(args = process.argv.slice(2)) {
 }
 
 function isDirectExecution(moduleUrl: string): boolean {
-  return process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(moduleUrl);
+  return (
+    process.argv[1] !== undefined &&
+    realpathSync(process.argv[1]) === fileURLToPath(moduleUrl)
+  );
 }
 
 if (isDirectExecution(import.meta.url)) {

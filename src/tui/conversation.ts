@@ -1,6 +1,7 @@
 import { wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
-import { colors } from "./theme.js";
+
 import { sanitizeTerminalText } from "../terminal-output.js";
+import { colors } from "./theme.js";
 
 export interface ConversationEntry {
   role: "user" | "assistant" | "system";
@@ -43,7 +44,12 @@ export class ConversationLog implements Component {
     const contentWidth = Math.max(1, width - 2);
     const lines: string[] = [];
     for (const entry of this.entries) {
-      const label = entry.role === "user" ? "你" : entry.role === "assistant" ? "助手" : "系统";
+      const label =
+        entry.role === "user"
+          ? "你"
+          : entry.role === "assistant"
+            ? "助手"
+            : "系统";
       lines.push(colors.accent(label));
       for (const sourceLine of sanitizeTerminalText(entry.text).split("\n")) {
         lines.push(...wrapTextWithAnsi(`  ${sourceLine}`, contentWidth));
@@ -52,7 +58,9 @@ export class ConversationLog implements Component {
     }
     if (lines.at(-1) === "") lines.pop();
     this.cachedWidth = width;
-    this.cachedLines = lines.length ? lines : [colors.muted("开始一段对话，或输入 /status 查看工作区。")] ;
+    this.cachedLines = lines.length
+      ? lines
+      : [colors.muted("开始一段对话，或输入 /status 查看工作区。")];
     return this.cachedLines;
   }
 

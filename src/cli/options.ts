@@ -1,6 +1,8 @@
-import { Command, CommanderError } from "commander";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+
+import { Command, CommanderError } from "commander";
+
 import { AppError } from "../errors.js";
 import { parseCliOptions, type CliOptions } from "../schemas.js";
 
@@ -11,7 +13,11 @@ interface ParsedCliOptions {
   status?: boolean;
 }
 
-export function parseCliArguments(args: string[], cwd: string, home = homedir()): CliOptions {
+export function parseCliArguments(
+  args: string[],
+  cwd: string,
+  home = homedir(),
+): CliOptions {
   const command = new Command()
     .name("interview-helper")
     .option("--data-dir <path>")
@@ -23,11 +29,12 @@ export function parseCliArguments(args: string[], cwd: string, home = homedir())
     .exitOverride()
     .configureOutput({ writeOut: () => {}, writeErr: () => {} });
 
-  const defaults = (help: boolean): CliOptions => parseCliOptions({
-    dataDir: resolve(home, ".interview-helper"),
-    status: false,
-    help,
-  });
+  const defaults = (help: boolean): CliOptions =>
+    parseCliOptions({
+      dataDir: resolve(home, ".interview-helper"),
+      status: false,
+      help,
+    });
 
   let options: ParsedCliOptions;
   try {
@@ -36,11 +43,16 @@ export function parseCliArguments(args: string[], cwd: string, home = homedir())
   } catch (error) {
     if (!(error instanceof CommanderError)) throw error;
     if (error.code === "commander.helpDisplayed") return defaults(true);
-    throw new AppError("INVALID_ARGUMENT", error.message, undefined, { cause: error });
+    throw new AppError("INVALID_ARGUMENT", error.message, undefined, {
+      cause: error,
+    });
   }
 
   return parseCliOptions({
-    dataDir: resolve(cwd, options.dataDir ?? resolve(home, ".interview-helper")),
+    dataDir: resolve(
+      cwd,
+      options.dataDir ?? resolve(home, ".interview-helper"),
+    ),
     ...(options.provider ? { provider: options.provider } : {}),
     ...(options.model ? { modelId: options.model } : {}),
     status: options.status ?? false,

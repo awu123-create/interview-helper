@@ -1,7 +1,12 @@
 import { loadModelConfig } from "../config/load-model-config.js";
 import { AppError, asAppError } from "../errors.js";
 import { hasCredentials } from "../runtime/credentials.js";
-import { PiModelRunner, type ModelEvent, type ModelRunner, type ModelRunnerDependencies } from "../runtime/pi.js";
+import {
+  PiModelRunner,
+  type ModelEvent,
+  type ModelRunner,
+  type ModelRunnerDependencies,
+} from "../runtime/pi.js";
 import type { ModelConfig, WorkspaceStatus } from "../schemas.js";
 import { WorkspaceStore } from "../store/workspace-store.js";
 
@@ -17,7 +22,9 @@ export interface Workbench {
   close(): Promise<void>;
 }
 
-export type ModelRunnerFactory = (dependencies: ModelRunnerDependencies) => ModelRunner;
+export type ModelRunnerFactory = (
+  dependencies: ModelRunnerDependencies,
+) => ModelRunner;
 
 class Workspace implements Workbench {
   readonly config: ModelConfig | undefined;
@@ -41,8 +48,12 @@ class Workspace implements Workbench {
     };
   }
 
-  async prompt(text: string, onEvent: (event: ModelEvent) => void): Promise<void> {
-    if (this.running) throw new AppError("REQUEST_IN_PROGRESS", "上一个模型任务仍在运行");
+  async prompt(
+    text: string,
+    onEvent: (event: ModelEvent) => void,
+  ): Promise<void> {
+    if (this.running)
+      throw new AppError("REQUEST_IN_PROGRESS", "上一个模型任务仍在运行");
     const taskId = this.store.createTask("model_prompt");
     this.running = true;
     try {
@@ -85,7 +96,11 @@ class Workspace implements Workbench {
 export function openWorkspace(
   dataDir: string,
   overrides: Partial<ModelConfig> = {},
-  options: { readOnly?: boolean; env?: NodeJS.ProcessEnv; runnerFactory?: ModelRunnerFactory } = {},
+  options: {
+    readOnly?: boolean;
+    env?: NodeJS.ProcessEnv;
+    runnerFactory?: ModelRunnerFactory;
+  } = {},
 ): Workbench {
   const store = new WorkspaceStore(dataDir, options.readOnly ?? false);
   const config = loadModelConfig(dataDir, overrides);
@@ -94,6 +109,7 @@ export function openWorkspace(
     store,
     config,
     options.env ?? process.env,
-    options.runnerFactory ?? ((dependencies) => new PiModelRunner(dependencies)),
+    options.runnerFactory ??
+      ((dependencies) => new PiModelRunner(dependencies)),
   );
 }

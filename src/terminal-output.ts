@@ -22,7 +22,13 @@ function skipStringSequence(text: string, start: number): number {
 function skipEscape(text: string, start: number): number {
   const introducer = text[start];
   if (introducer === "[") return skipCsi(text, start + 1);
-  if (introducer === "]" || introducer === "P" || introducer === "X" || introducer === "^" || introducer === "_") {
+  if (
+    introducer === "]" ||
+    introducer === "P" ||
+    introducer === "X" ||
+    introducer === "^" ||
+    introducer === "_"
+  ) {
     return skipStringSequence(text, start + 1);
   }
   let index = start + 1;
@@ -46,7 +52,13 @@ export function sanitizeTerminalText(text: string): string {
       index = skipEscape(text, index + 1);
     } else if (code === 0x9b) {
       index = skipCsi(text, index + 1);
-    } else if (code === 0x90 || code === 0x98 || code === 0x9d || code === 0x9e || code === 0x9f) {
+    } else if (
+      code === 0x90 ||
+      code === 0x98 ||
+      code === 0x9d ||
+      code === 0x9e ||
+      code === 0x9f
+    ) {
       index = skipStringSequence(text, index + 1);
     } else if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) {
       output += " ";

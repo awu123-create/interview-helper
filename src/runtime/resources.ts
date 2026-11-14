@@ -1,4 +1,7 @@
-import { createExtensionRuntime, type ResourceLoader } from "@earendil-works/pi-coding-agent";
+import {
+  createExtensionRuntime,
+  type ResourceLoader,
+} from "@earendil-works/pi-coding-agent";
 
 export const PRODUCT_SYSTEM_PROMPT = `你是 Interview Helper 的本地学习助手。
 本轮只提供工作区状态查询和通用对话，不执行代码，不读取文件，不访问 Shell。
@@ -7,7 +10,11 @@ export const PRODUCT_SYSTEM_PROMPT = `你是 Interview Helper 的本地学习助
 
 export function createProductResourceLoader(): ResourceLoader {
   return {
-    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getExtensions: () => ({
+      extensions: [],
+      errors: [],
+      runtime: createExtensionRuntime(),
+    }),
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),

@@ -24,18 +24,34 @@ export class AppError extends Error {
   }
 
   toJSON() {
-    return { code: this.code, message: this.message, taskId: this.taskId ?? null };
+    return {
+      code: this.code,
+      message: this.message,
+      taskId: this.taskId ?? null,
+    };
   }
 }
 
 export function asCliError(error: unknown): AppError {
   if (error instanceof AppError) return error;
-  return new AppError("INTERNAL_ERROR", error instanceof Error ? error.message : String(error), undefined, { cause: error });
+  return new AppError(
+    "INTERNAL_ERROR",
+    error instanceof Error ? error.message : String(error),
+    undefined,
+    { cause: error },
+  );
 }
 
 export function asAppError(error: unknown, taskId?: string): AppError {
   if (error instanceof AppError) {
-    return new AppError(error.code, error.message, taskId ?? error.taskId, { cause: error.cause });
+    return new AppError(error.code, error.message, taskId ?? error.taskId, {
+      cause: error.cause,
+    });
   }
-  return new AppError("MODEL_REQUEST_FAILED", error instanceof Error ? error.message : String(error), taskId, { cause: error });
+  return new AppError(
+    "MODEL_REQUEST_FAILED",
+    error instanceof Error ? error.message : String(error),
+    taskId,
+    { cause: error },
+  );
 }

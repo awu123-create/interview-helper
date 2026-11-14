@@ -1,6 +1,8 @@
-import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+
+import Database from "better-sqlite3";
+
 import { AppError } from "../errors.js";
 
 export const SCHEMA_VERSION = 1;
@@ -8,9 +10,15 @@ export const SCHEMA_VERSION = 1;
 export class WorkspaceDatabase {
   readonly db: Database.Database;
 
-  constructor(readonly dataDir: string, readonly readOnly = false) {
+  constructor(
+    readonly dataDir: string,
+    readonly readOnly = false,
+  ) {
     mkdirSync(resolve(dataDir, "runtime"), { recursive: true });
-    this.db = new Database(resolve(dataDir, "state.sqlite"), { readonly: readOnly, fileMustExist: readOnly });
+    this.db = new Database(resolve(dataDir, "state.sqlite"), {
+      readonly: readOnly,
+      fileMustExist: readOnly,
+    });
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("busy_timeout = 100");
     if (readOnly) this.assertCompatible();
@@ -20,14 +28,20 @@ export class WorkspaceDatabase {
   private assertCompatible() {
     const version = this.db.pragma("user_version", { simple: true }) as number;
     if (version !== SCHEMA_VERSION) {
-      throw new AppError("DATA_VERSION_UNSUPPORTED", `数据版本 ${version} 与支持的版本 ${SCHEMA_VERSION} 不兼容`);
+      throw new AppError(
+        "DATA_VERSION_UNSUPPORTED",
+        `数据版本 ${version} 与支持的版本 ${SCHEMA_VERSION} 不兼容`,
+      );
     }
   }
 
   private migrate() {
     const version = this.db.pragma("user_version", { simple: true }) as number;
     if (version > SCHEMA_VERSION) {
-      throw new AppError("DATA_VERSION_UNSUPPORTED", `数据版本 ${version} 高于支持的版本 ${SCHEMA_VERSION}`);
+      throw new AppError(
+        "DATA_VERSION_UNSUPPORTED",
+        `数据版本 ${version} 高于支持的版本 ${SCHEMA_VERSION}`,
+      );
     }
     if (version === SCHEMA_VERSION) return;
     this.db.transaction(() => {
