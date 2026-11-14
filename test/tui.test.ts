@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TuiAltScreen, type ProgramStatus, type Terminal } from "@earendil-works/pi-tui";
+
+import {
+  TuiAltScreen,
+  type ProgramStatus,
+  type Terminal,
+} from "@earendil-works/pi-tui";
+
 import type { Workbench, WorkspaceSnapshot } from "../src/app/workspace.js";
 import type { ModelEvent } from "../src/runtime/pi.js";
 import { InterviewTui } from "../src/tui/app.js";
@@ -18,9 +24,13 @@ class TestTerminal implements Terminal {
     this.input = onInput;
     this.resize = onResize;
   }
-  stop() { this.stopped = true; }
+  stop() {
+    this.stopped = true;
+  }
   async drainInput() {}
-  write(data: string) { this.output += data; }
+  write(data: string) {
+    this.output += data;
+  }
   moveBy() {}
   hideCursor() {}
   showCursor() {}
@@ -69,8 +79,12 @@ class ControlledWorkbench implements Workbench {
     });
   }
 
-  emit(event: ModelEvent) { this.eventHandler?.(event); }
-  finish() { this.complete?.(); }
+  emit(event: ModelEvent) {
+    this.eventHandler?.(event);
+  }
+  finish() {
+    this.complete?.();
+  }
   async close() {
     this.finish();
     await new Promise((resolve) => setImmediate(resolve));
@@ -118,7 +132,8 @@ test("Kitty 松开事件不会重复切焦点或滚动", async () => {
   terminal.input?.("\x1b[9;1:3u");
   assert.equal(app.focusArea, "navigation");
   app.setFocus("conversation");
-  for (let index = 0; index < 80; index += 1) app.conversation.add("system", `历史 ${index}`);
+  for (let index = 0; index < 80; index += 1)
+    app.conversation.add("system", `历史 ${index}`);
   app.tui.renderNow();
   app.conversationScroll.scrollTo(20);
   terminal.input?.("\x1b[1;1A");
@@ -136,7 +151,9 @@ test("自动重试会清除失败尝试的文本残片", async () => {
   runner.emit({ type: "text_delta", delta: "Hel" });
   runner.emit({ type: "retry", attempt: 1 });
   runner.emit({ type: "text_delta", delta: "Hello" });
-  const assistants = app.conversation.getEntries().filter((entry) => entry.role === "assistant");
+  const assistants = app.conversation
+    .getEntries()
+    .filter((entry) => entry.role === "assistant");
   assert.equal(assistants.at(-1)?.text, "Hello");
   runner.finish();
   await new Promise((resolve) => setImmediate(resolve));
@@ -148,7 +165,10 @@ test("模型控制序列不会进入终端输出", async () => {
   app.start();
   app.editor.setText("测试输出");
   app.editor.handleInput("\r");
-  runner.emit({ type: "text_delta", delta: "safe \x1b]52;c;cG93bmVk\x07 text" });
+  runner.emit({
+    type: "text_delta",
+    delta: "safe \x1b]52;c;cG93bmVk\x07 text",
+  });
   app.tui.renderNow();
   assert.equal(terminal.output.includes("\x1b]52;c"), false);
   assert.match(terminal.output, /safe/);
@@ -187,7 +207,8 @@ test("流式期间可继续编辑，活动状态刷新且历史位置不变", as
   assert.match(terminal.output, /活动任务: 1/);
   app.editor.insertTextAtCursor("继续编辑");
   assert.equal(app.editor.getExpandedText(), "继续编辑");
-  for (let index = 0; index < 80; index += 1) app.conversation.add("system", `历史 ${index}`);
+  for (let index = 0; index < 80; index += 1)
+    app.conversation.add("system", `历史 ${index}`);
   app.tui.renderNow();
   app.conversationScroll.scrollToStart();
   const top = app.conversationScroll.scrollTop;
@@ -197,7 +218,13 @@ test("流式期间可继续编辑，活动状态刷新且历史位置不变", as
   app.tui.renderNow();
   assert.equal(app.conversationScroll.scrollTop, top);
   assert.equal(app.conversationScroll.isFollowingEnd, false);
-  assert.match(app.conversation.getEntries().map((entry) => entry.text).join("\n"), /第一部分/);
+  assert.match(
+    app.conversation
+      .getEntries()
+      .map((entry) => entry.text)
+      .join("\n"),
+    /第一部分/,
+  );
   runner.finish();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(app.streaming, false);
@@ -221,6 +248,10 @@ test("非输入焦点不会把文字当成提交", async () => {
   app.setFocus("navigation");
   terminal.input?.("不是答案");
   assert.equal(runner.calls, 0);
-  assert.equal(app.conversation.getEntries().filter((entry) => entry.role === "user").length, 0);
+  assert.equal(
+    app.conversation.getEntries().filter((entry) => entry.role === "user")
+      .length,
+    0,
+  );
   await app.stop();
 });

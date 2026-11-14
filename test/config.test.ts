@@ -1,24 +1,40 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
-import { spawnSync } from "node:child_process";
+
 import { parseCliArguments } from "../src/cli/options.js";
 import { loadModelConfig } from "../src/config/load-model-config.js";
 import { AppError, asCliError } from "../src/errors.js";
-import { PROVIDER_ENVIRONMENT, resolveCredentials } from "../src/runtime/credentials.js";
+import {
+  PROVIDER_ENVIRONMENT,
+  resolveCredentials,
+} from "../src/runtime/credentials.js";
 import { createProductResourceLoader } from "../src/runtime/resources.js";
 
 test("数据目录与启动目录无关", () => {
-  const options = parseCliArguments(["--data-dir", ".data"], "/tmp/project-a", "/home/test");
+  const options = parseCliArguments(
+    ["--data-dir", ".data"],
+    "/tmp/project-a",
+    "/home/test",
+  );
   assert.equal(options.dataDir, "/tmp/project-a/.data");
-  assert.equal(parseCliArguments([], "/tmp/project-b", "/home/test").dataDir, "/home/test/.interview-helper");
+  assert.equal(
+    parseCliArguments([], "/tmp/project-b", "/home/test").dataDir,
+    "/home/test/.interview-helper",
+  );
 });
 
 test("Commander 解析现有参数和 --flag=value 形式", () => {
   const options = parseCliArguments(
-    ["--data-dir=.data", "--provider=deepseek", "--model=deepseek-flash", "--status"],
+    [
+      "--data-dir=.data",
+      "--provider=deepseek",
+      "--model=deepseek-flash",
+      "--status",
+    ],
     "/tmp/project-a",
     "/home/test",
   );
@@ -35,7 +51,8 @@ test("Commander 输入错误保持 INVALID_ARGUMENT", () => {
   for (const args of [["--unknown"], ["--model"], ["unexpected"]]) {
     assert.throws(
       () => parseCliArguments(args, "/tmp/project-a", "/home/test"),
-      (error: unknown) => error instanceof AppError && error.code === "INVALID_ARGUMENT",
+      (error: unknown) =>
+        error instanceof AppError && error.code === "INVALID_ARGUMENT",
     );
   }
 });
@@ -58,7 +75,11 @@ test("通过符号链接执行 CLI 仍进入 main", () => {
   const dir = mkdtempSync(resolve(tmpdir(), "interview-cli-link-"));
   const link = resolve(dir, "interview-helper.ts");
   symlinkSync(resolve("src/cli/main.ts"), link);
-  const result = spawnSync(process.execPath, ["--import", "tsx", link, "--help"], { cwd: process.cwd(), encoding: "utf8" });
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", link, "--help"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Interview Helper/);
 });
@@ -66,10 +87,23 @@ test("通过符号链接执行 CLI 仍进入 main", () => {
 test("模型配置经过 schema 校验", () => {
   const dir = mkdtempSync(resolve(tmpdir(), "interview-config-"));
   mkdirSync(resolve(dir, "runtime"));
-  writeFileSync(resolve(dir, "runtime", "config.json"), JSON.stringify({ provider: "openai", modelId: "gpt-5.2" }));
-  assert.deepEqual(loadModelConfig(dir), { provider: "openai", modelId: "gpt-5.2" });
-  writeFileSync(resolve(dir, "runtime", "config.json"), JSON.stringify({ provider: "openai", modelId: "gpt-5.2", key: "secret" }));
-  assert.throws(() => loadModelConfig(dir), (error: unknown) => error instanceof AppError && error.code === "INVALID_CONFIG");
+  writeFileSync(
+    resolve(dir, "runtime", "config.json"),
+    JSON.stringify({ provider: "openai", modelId: "gpt-5.2" }),
+  );
+  assert.deepEqual(loadModelConfig(dir), {
+    provider: "openai",
+    modelId: "gpt-5.2",
+  });
+  writeFileSync(
+    resolve(dir, "runtime", "config.json"),
+    JSON.stringify({ provider: "openai", modelId: "gpt-5.2", key: "secret" }),
+  );
+  assert.throws(
+    () => loadModelConfig(dir),
+    (error: unknown) =>
+      error instanceof AppError && error.code === "INVALID_CONFIG",
+  );
 });
 
 test("只读取所选 provider 的环境变量", () => {
@@ -80,14 +114,22 @@ test("只读取所选 provider 的环境变量", () => {
   assert.equal(credentials.apiKey, "selected");
   assert.equal(credentials.environmentVariable, "ANTHROPIC_API_KEY");
   assert.throws(
-    () => resolveCredentials({ provider: "openai", modelId: "gpt-5.2" }, { ANTHROPIC_API_KEY: "other" }),
-    (error: unknown) => error instanceof AppError && error.code === "MISSING_CREDENTIALS",
+    () =>
+      resolveCredentials(
+        { provider: "openai", modelId: "gpt-5.2" },
+        { ANTHROPIC_API_KEY: "other" },
+      ),
+    (error: unknown) =>
+      error instanceof AppError && error.code === "MISSING_CREDENTIALS",
   );
 });
 
 test("每个支持的 provider 都只解析自己的环境变量", () => {
   for (const [provider, variable] of Object.entries(PROVIDER_ENVIRONMENT)) {
-    const credentials = resolveCredentials({ provider, modelId: "test-model" }, { [variable]: `${provider}-key` });
+    const credentials = resolveCredentials(
+      { provider, modelId: "test-model" },
+      { [variable]: `${provider}-key` },
+    );
     assert.equal(credentials.apiKey, `${provider}-key`);
     assert.equal(credentials.environmentVariable, variable);
   }

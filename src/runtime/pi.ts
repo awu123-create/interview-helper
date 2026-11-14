@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import {
   createAgentSession,
   ModelRuntime,
@@ -6,9 +8,13 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { resolve } from "node:path";
+
 import { AppError, asAppError } from "../errors.js";
-import { parsePrompt, type ModelConfig, type WorkspaceStatus } from "../schemas.js";
+import {
+  parsePrompt,
+  type ModelConfig,
+  type WorkspaceStatus,
+} from "../schemas.js";
 import { resolveCredentials } from "./credentials.js";
 import { createProductResourceLoader } from "./resources.js";
 import { createWorkspaceStatusTool } from "./tools.js";
@@ -32,7 +38,10 @@ export interface ModelRunnerDependencies {
   sessionFactory?: () => Promise<AgentSession>;
 }
 
-export function createModelSettings(provider: string, modelId: string): SettingsManager {
+export function createModelSettings(
+  provider: string,
+  modelId: string,
+): SettingsManager {
   return SettingsManager.inMemory({
     defaultProvider: provider,
     defaultModel: modelId,
@@ -59,19 +68,26 @@ export class PiModelRunner implements ModelRunner {
     this.config = dependencies.config;
     this.env = dependencies.env;
     this.readStatus = dependencies.readStatus;
-    this.sessionFactory = dependencies.sessionFactory ?? (() => this.createSession());
+    this.sessionFactory =
+      dependencies.sessionFactory ?? (() => this.createSession());
   }
 
   activeTools(): string[] {
     return this.session?.getActiveToolNames() ?? ["workspace_status"];
   }
 
-  async prompt(text: string, onEvent: (event: ModelEvent) => void): Promise<void> {
+  async prompt(
+    text: string,
+    onEvent: (event: ModelEvent) => void,
+  ): Promise<void> {
     const input = parsePrompt(text);
-    if (this.running) throw new AppError("REQUEST_IN_PROGRESS", "上一个模型任务仍在运行");
+    if (this.running)
+      throw new AppError("REQUEST_IN_PROGRESS", "上一个模型任务仍在运行");
     this.running = true;
     let markIdle!: () => void;
-    this.idlePromise = new Promise<void>((resolve) => { markIdle = resolve; });
+    this.idlePromise = new Promise<void>((resolve) => {
+      markIdle = resolve;
+    });
     try {
       const session = await this.getSession();
       let modelFailure: AppError | undefined;
@@ -79,7 +95,8 @@ export class PiModelRunner implements ModelRunner {
       const unsubscribe = session.subscribe((event) => {
         if (event.type === "auto_retry_start") modelFailure = undefined;
         const eventFailure = this.forwardEvent(event, onEvent);
-        if (event.type === "tool_execution_end" && event.isError) toolFailure ??= eventFailure;
+        if (event.type === "tool_execution_end" && event.isError)
+          toolFailure ??= eventFailure;
         else modelFailure ??= eventFailure;
       });
       try {
@@ -117,12 +134,24 @@ export class PiModelRunner implements ModelRunner {
       refreshOnCreate: false,
       allowModelNetwork: false,
     });
-    await modelRuntime.setRuntimeApiKey(credentials.provider, credentials.apiKey);
-    const model = modelRuntime.getModel(credentials.provider, credentials.modelId);
+    await modelRuntime.setRuntimeApiKey(
+      credentials.provider,
+      credentials.apiKey,
+    );
+    const model = modelRuntime.getModel(
+      credentials.provider,
+      credentials.modelId,
+    );
     if (!model) {
-      throw new AppError("MODEL_NOT_FOUND", `内置模型不存在: ${credentials.provider}/${credentials.modelId}`);
+      throw new AppError(
+        "MODEL_NOT_FOUND",
+        `内置模型不存在: ${credentials.provider}/${credentials.modelId}`,
+      );
     }
-    const settingsManager = createModelSettings(credentials.provider, credentials.modelId);
+    const settingsManager = createModelSettings(
+      credentials.provider,
+      credentials.modelId,
+    );
     const result = await createAgentSession({
       cwd: runtimeDir,
       agentDir: runtimeDir,
@@ -132,27 +161,50 @@ export class PiModelRunner implements ModelRunner {
       thinkingLevel: "off",
       resourceLoader: createProductResourceLoader(),
       settingsManager,
-      sessionManager: SessionManager.create(runtimeDir, resolve(runtimeDir, "sessions")),
+      sessionManager: SessionManager.create(
+        runtimeDir,
+        resolve(runtimeDir, "sessions"),
+      ),
       tools: ["workspace_status"],
       customTools: [createWorkspaceStatusTool(this.readStatus)],
     });
     return result.session;
   }
 
-  private forwardEvent(event: AgentSessionEvent, onEvent: (event: ModelEvent) => void): AppError | undefined {
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+  private forwardEvent(
+    event: AgentSessionEvent,
+    onEvent: (event: ModelEvent) => void,
+  ): AppError | undefined {
+    if (
+      event.type === "message_update" &&
+      event.assistantMessageEvent.type === "text_delta"
+    ) {
       onEvent({ type: "text_delta", delta: event.assistantMessageEvent.delta });
     } else if (event.type === "tool_execution_start") {
       onEvent({ type: "tool", name: event.toolName, status: "started" });
     } else if (event.type === "tool_execution_end") {
       const status = event.isError ? "failed" : "completed";
       onEvent({ type: "tool", name: event.toolName, status });
-      if (event.isError) return new AppError("MODEL_REQUEST_FAILED", `工具 ${event.toolName} 调用失败`);
+      if (event.isError)
+        return new AppError(
+          "MODEL_REQUEST_FAILED",
+          `工具 ${event.toolName} 调用失败`,
+        );
     } else if (event.type === "auto_retry_start") {
       onEvent({ type: "retry", attempt: event.attempt });
-    } else if (event.type === "message_end" && event.message.role === "assistant") {
-      if (event.message.stopReason === "error" || event.message.stopReason === "aborted") {
-        return new AppError("MODEL_REQUEST_FAILED", event.message.errorMessage ?? `模型请求以 ${event.message.stopReason} 结束`);
+    } else if (
+      event.type === "message_end" &&
+      event.message.role === "assistant"
+    ) {
+      if (
+        event.message.stopReason === "error" ||
+        event.message.stopReason === "aborted"
+      ) {
+        return new AppError(
+          "MODEL_REQUEST_FAILED",
+          event.message.errorMessage ??
+            `模型请求以 ${event.message.stopReason} 结束`,
+        );
       }
     } else if (event.type === "agent_settled" && event.aborted) {
       return new AppError("MODEL_REQUEST_FAILED", "模型请求已取消");
