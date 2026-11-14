@@ -1,0 +1,48 @@
+minimum_pre_commit_version: "3.2.0"
+fail_fast: false
+
+repos:
+  - repo: local
+    hooks:
+      - id: secrets
+        name: Gitleaks staged secrets
+        language: system
+        entry: gitleaks git --pre-commit --redact --staged
+        pass_filenames: false
+        always_run: true
+
+      - id: format
+        name: Oxfmt staged files
+        language: system
+        entry: npm exec -- oxfmt --write
+        files: ^((src|test|scripts)/.*\.ts|package\.json|tsconfig(\.build)?\.json|\.oxfmtrc\.json|\.oxlintrc\.json|\.dependency-cruiser\.js|\.pre-commit-config\.yaml)$
+
+      - id: lint
+        name: Oxlint staged files
+        language: system
+        entry: npm exec -- oxlint --fix
+        files: ^((src|test|scripts)/.*\.ts|\.dependency-cruiser\.js)$
+
+      - id: typecheck
+        name: TypeScript project check
+        language: system
+        entry: make typecheck
+        files: ^((src|test|scripts)/.*\.ts|package(-lock)?\.json|tsconfig(\.build)?\.json)$
+        pass_filenames: false
+        always_run: true
+
+      - id: test
+        name: Offline test suite
+        language: system
+        entry: make test
+        files: ^((src|test|scripts)/.*\.ts|package(-lock)?\.json)$
+        pass_filenames: false
+        always_run: true
+
+      - id: layers
+        name: Dependency layer check
+        language: system
+        entry: make layers
+        files: ^(src/.*\.ts|test/layers\.test\.ts|\.dependency-cruiser\.js|package(-lock)?\.json)$
+        pass_filenames: false
+        always_run: true

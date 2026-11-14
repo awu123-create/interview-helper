@@ -87,11 +87,74 @@ Pi 会话保存在 `DATA_DIR/runtime/sessions`。配置位于 `DATA_DIR/runtime/
 
 ## 验证
 
+离线验证还需要 Gitleaks 8.30.1。它不是 npm 依赖，可将官方 release 二进制安装到已忽略的 `.artifacts/tools` 目录。
+
+macOS Apple Silicon：
+
 ```sh
-npm run verify:offline
+mkdir -p .artifacts/tools/gitleaks
+curl --fail --location \
+  https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
+  --output .artifacts/tools/gitleaks.tar.gz
+echo "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5  .artifacts/tools/gitleaks.tar.gz" | shasum -a 256 --check
+tar -xzf .artifacts/tools/gitleaks.tar.gz -C .artifacts/tools/gitleaks gitleaks
+export PATH="$PWD/.artifacts/tools/gitleaks:$PATH"
+gitleaks version
 ```
 
-该入口依次执行类型检查、构建、Node.js 单元/集成测试和 `git diff --check`，不调用真实模型。结果写入 `.artifacts/offline-results.json`。
+Linux x86_64：
+
+```sh
+mkdir -p .artifacts/tools/gitleaks
+curl --fail --location \
+  https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+  --output .artifacts/tools/gitleaks.tar.gz
+echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  .artifacts/tools/gitleaks.tar.gz" | sha256sum --check
+tar -xzf .artifacts/tools/gitleaks.tar.gz -C .artifacts/tools/gitleaks gitleaks
+export PATH="$PWD/.artifacts/tools/gitleaks:$PATH"
+gitleaks version
+```
+
+然后运行单项检查或完整离线验证：
+
+```sh
+make format-check
+make typecheck
+make lint
+make test
+make secrets
+make layers
+make verify
+```
+
+`make` 默认执行 `make verify`。这些目标复用 `package.json` 中的命令；`make verify` 依次执行上述六项检查和 `git diff --check`，不执行构建，不调用真实模型。结果写入 `.artifacts/offline-results.json`。需要自动修复格式时单独运行 `make format`。
+
+### Pre-commit hooks
+
+提交前检查使用 Python pre-commit 3.2.0 或更高版本。先完成 `npm ci` 和上述 Gitleaks 安装。macOS 可用 Homebrew 安装框架；`pre-commit --version` 已能正常显示版本时无需重复安装：
+
+```sh
+brew install pre-commit
+```
+
+在该 clone 的任意工作目录运行一次以下命令，将官方 hook 安装到共享 Git hooks 目录：
+
+```sh
+make setup-hooks
+pre-commit validate-config
+```
+
+共享 hook 对现有及以后创建的 linked worktree 都生效，并在各自工作目录读取配置。每个 worktree 都需要安装自己的 npm 依赖，并确保 pre-commit 和 Gitleaks 可从 `PATH` 调用。
+
+旧分支如果没有 `.pre-commit-config.yaml` 和 `Makefile`，提交会明确失败；先合入这套配置再提交。
+
+正常 `git commit` 会执行以下检查：
+
+- Oxfmt 和 Oxlint 只接收匹配的暂存文件，分别执行 `--write` 和 `--fix`。
+- TypeScript、离线测试和分层检查复用 Makefile 与 `package.json` 中的完整项目命令，不接收文件名参数，每次提交都会运行，包括纯删除提交。
+- Gitleaks 使用 `gitleaks git --pre-commit --redact --staged` 扫描暂存内容；CI 中的 `npm run secrets` 仍扫描 `HEAD` 可达历史。
+
+部分暂存时，pre-commit 会暂时收起已跟踪文件的未暂存改动，并在结束后恢复。未跟踪文件不会自动隔离；完整项目命令也会按各自配置读取工作目录，不能把它们理解为只看到暂存快照。格式或 lint 自动修复只留在工作区，hook 会失败；检查修复结果后需要手动暂存再提交。hook 不会自动执行 `git add` 或创建提交，日常开发不要使用 `git commit --no-verify`。
 
 真实 API 验证需要操作者明确确认提供方、模型和调用费用：
 

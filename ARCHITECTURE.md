@@ -333,7 +333,7 @@ npm run verify:live -- --data-dir .artifacts/slice-1-live
 ### 本文的可重复验证
 
 ```sh
-node scripts/verify-architecture.mjs
+npm exec -- tsx scripts/verify-architecture.ts
 git diff --check
 ```
 

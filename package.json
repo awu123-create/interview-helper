@@ -11,9 +11,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "format": "oxfmt --write src test scripts package.json tsconfig.json tsconfig.build.json .oxfmtrc.json .oxlintrc.json .dependency-cruiser.js .pre-commit-config.yaml",
+    "format:check": "oxfmt --check src test scripts package.json tsconfig.json tsconfig.build.json .oxfmtrc.json .oxlintrc.json .dependency-cruiser.js .pre-commit-config.yaml",
     "typecheck": "tsc -p tsconfig.json",
+    "lint": "oxlint src test scripts .dependency-cruiser.js",
     "test": "node --import tsx --test test/*.test.ts",
-    "verify:offline": "node scripts/verify-offline.mjs",
+    "secrets": "gitleaks git --redact --log-opts=HEAD .",
+    "layers": "dependency-cruise --config .dependency-cruiser.js --output-type err --no-cache src",
+    "verify:offline": "tsx scripts/verify-offline.ts",
     "verify:live": "node --import tsx scripts/verify-live.ts"
   },
   "dependencies": {
@@ -27,6 +32,9 @@
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.19.19",
+    "dependency-cruiser": "18.7.2",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.80.0",
     "tsx": "4.21.0",
     "typescript": "5.9.3"
   }

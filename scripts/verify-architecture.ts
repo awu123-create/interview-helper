@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
 import {
@@ -17,18 +16,31 @@ const input = join(root, "ARCHITECTURE.md");
 const markdown = await readFile(input, "utf8");
 const cliVersion = "12.2.0";
 
-let fence = null;
+type Fence = {
+  marker: string;
+  length: number;
+  line: number;
+};
+
+let fence: Fence | null = null;
 let diagramCount = 0;
 for (const [index, line] of markdown.split(/\r?\n/).entries()) {
   const match = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/);
   if (!match) continue;
+  const marker = match[1];
+  const info = match[2];
+  if (marker === undefined || info === undefined) continue;
   if (!fence) {
-    fence = { marker: match[1][0], length: match[1].length, line: index + 1 };
-    if (match[2].trim() === "mermaid") diagramCount += 1;
+    fence = {
+      marker: marker.charAt(0),
+      length: marker.length,
+      line: index + 1,
+    };
+    if (info.trim() === "mermaid") diagramCount += 1;
   } else if (
-    match[1][0] === fence.marker &&
-    match[1].length >= fence.length &&
-    match[2].trim() === ""
+    match[1]?.charAt(0) === fence.marker &&
+    marker.length >= fence.length &&
+    info.trim() === ""
   ) {
     fence = null;
   }
@@ -42,14 +54,15 @@ const browsers = [
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
 ];
-let executablePath;
+let executablePath: string | undefined;
 for (const candidate of browsers) {
   try {
     await access(candidate, constants.X_OK);
     executablePath = candidate;
     break;
   } catch (error) {
-    if (!["ENOENT", "EACCES"].includes(error.code)) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "EACCES") throw error;
   }
 }
 if (!executablePath) {
