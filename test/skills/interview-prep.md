@@ -1,10 +1,10 @@
 # interview-prep 行为验收
 
-验收对象是 [skill 源码](../../skills/interview-prep/SKILL.md)；结构检查由 [Node 脚本](../../scripts/verify-interview-skill.mjs)完成。只使用下列虚构材料，个人档案放在临时目录，不安装 skill、不调用收费 API、不测试旧应用。
+验收对象是 [skill 源码](../../skills/interview-prep/SKILL.md)；结构检查由 [Node 脚本](../../scripts/verify-interview-skill.mjs)完成。只使用下列虚构材料，个人档案放在临时目录，不安装 skill、不调用收费 API。
 
 ## 结构检查
 
-在仓库根目录运行，使用仓库现有 Node 环境，无额外依赖：
+在仓库根目录运行，使用 .nvmrc 指定的 Node.js 版本，无额外依赖：
 
 ```sh
 node --check scripts/verify-interview-skill.mjs
@@ -14,14 +14,6 @@ git status --short --branch -uall
 ```
 
 脚本定位自身所在仓库，不依赖调用时的工作目录。检查单文件 skill 包、单行 frontmatter、500 行上限、UTF-8、围栏和简单行内本地链接/标题锚点；拒绝未支持的引用形式。它不解析完整 YAML/Markdown，不联网，也不根据关键词判定行为正确。
-
-`git diff --check` 不覆盖未跟踪文件。对仍未跟踪的三个文件逐个补查；无差异时退出 0，有新增内容时退出 1，只有出现输出才表示空白问题：
-
-```sh
-git diff --no-index --check /dev/null skills/interview-prep/SKILL.md
-git diff --no-index --check /dev/null test/skills/interview-prep.md
-git diff --no-index --check /dev/null scripts/verify-interview-skill.mjs
-```
 
 下列命令只在新临时目录制造损坏副本，检验脚本是否真正拒绝异常，不改源码。输出每个用例的退出状态；临时目录保留以便复查。
 
